@@ -120,21 +120,24 @@ app.post("/webhook", (req, res) => {
   const messageBody = req.body.Body.trim();
   const from = req.body.From;
 
+  // Create TwiML response
+  const twiml = new twilio.twiml.MessagingResponse();
+
   // Check for help command
   if (messageBody.toLowerCase() === "/help") {
     sendWhatsAppMessageNoDelay(from, getHelpMessage());
-    return res.sendStatus(200);
+    return res.type("text/xml").send(twiml.toString());
   }
 
   // Check for schedule check command
   if (messageBody.toLowerCase() === "/cekpiket") {
     sendWhatsAppMessageNoDelay(from, getPiketScheduleMessage());
-    return res.sendStatus(200);
+    return res.type("text/xml").send(twiml.toString());
   }
 
   // Check for galon commands
   if (handleGalonCommand(messageBody, from)) {
-    return res.sendStatus(200);
+    return res.type("text/xml").send(twiml.toString());
   }
 
   // Handle piket confirmation
@@ -148,7 +151,6 @@ app.post("/webhook", (req, res) => {
         clearInterval(activeReminders[from]);
         delete activeReminders[from];
       }
-      const twiml = new twilio.twiml.MessagingResponse();
       twiml.message(
         `✅ Terima kasih sudah melakukan piket hari ini di ${config.kontrakanName}!\n` +
           `Pengingat telah dihentikan.`
@@ -163,7 +165,7 @@ app.post("/webhook", (req, res) => {
     "❌ Perintah tidak dikenali.\n" +
       "Ketik /help untuk melihat daftar perintah yang tersedia."
   );
-  return res.sendStatus(200);
+  return res.type("text/xml").send(twiml.toString());
 });
 
 async function sendReminder(jadwal) {
