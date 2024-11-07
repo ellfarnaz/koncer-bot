@@ -120,34 +120,30 @@ app.post("/webhook", (req, res) => {
   const messageBody = req.body.Body.trim();
   const from = req.body.From;
 
-  // Check for help command first
+  // Check for help command
   if (messageBody.toLowerCase() === "/help") {
     sendWhatsAppMessageNoDelay(from, getHelpMessage());
-    res.sendStatus(200);
-    return;
+    return res.sendStatus(200);
   }
 
   // Check for schedule check command
   if (messageBody.toLowerCase() === "/cekpiket") {
     sendWhatsAppMessageNoDelay(from, getPiketScheduleMessage());
-    res.sendStatus(200);
-    return;
+    return res.sendStatus(200);
   }
 
-  // Check for galon commands first
+  // Check for galon commands
   if (handleGalonCommand(messageBody, from)) {
-    res.sendStatus(200);
-    return;
+    return res.sendStatus(200);
   }
 
-  // Continue with existing piket logic
+  // Handle piket confirmation
   if (messageBody.toLowerCase() === "sudah piket") {
     const hari = getIndonesianDay();
     const jadwal = config.jadwalPiket[hari];
 
     if (hari !== "Minggu" && jadwal?.nomor === from) {
       markTaskCompleted(from);
-      // Clear active reminder if exists
       if (activeReminders[from]) {
         clearInterval(activeReminders[from]);
         delete activeReminders[from];
@@ -157,11 +153,17 @@ app.post("/webhook", (req, res) => {
         `✅ Terima kasih sudah melakukan piket hari ini di ${config.kontrakanName}!\n` +
           `Pengingat telah dihentikan.`
       );
-      res.type("text/xml").send(twiml.toString());
-      return;
+      return res.type("text/xml").send(twiml.toString());
     }
   }
-  res.sendStatus(200);
+
+  // If no valid command matched, send help message
+  sendWhatsAppMessageNoDelay(
+    from,
+    "❌ Perintah tidak dikenali.\n" +
+      "Ketik /help untuk melihat daftar perintah yang tersedia."
+  );
+  return res.sendStatus(200);
 });
 
 async function sendReminder(jadwal) {
