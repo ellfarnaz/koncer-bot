@@ -4,7 +4,7 @@
   "description": "Bot WhatsApp Pengingat Kontrakan Ceria menggunakan Twilio",
   "main": "src/server/piketReminder.js",
   "scripts": {
-    "start": "node src/server/piketReminder.js",
+    "start": "node src/server/server-localtunnel.js",
     "dev": "node src/server/server-localtunnel.js",
     "tunnel": "node src/server/server-localtunnel.js"
   },
