@@ -24,24 +24,35 @@ app.post("/webhook", async (req, res) => {
       message: req.body.Body,
     });
 
-    const result = await webhookController.handleIncomingMessage(req, res);
+    // Check if message body exists
+    if (!req.body.Body) {
+      console.log("Missing message body");
+      return res.status(400).json({ error: "Missing message body" });
+    }
 
-    // If we have a response and it's not already sent
-    if (result && !res.headersSent) {
+    const result = await webhookController.handleIncomingMessage(req.body);
+
+    // If we have a response
+    if (result) {
       console.log("📤 Sending response:", result);
 
-      // Send response back via Twilio
-      const sender = req.body.From;
-      await sendWhatsAppMessage(sender, result);
+      try {
+        // Send response via WhatsApp
+        await sendWhatsAppMessage(req.body.From, result);
 
-      // Send acknowledgment to Twilio
-      res.status(200).send(result);
+        // Send success response to Twilio
+        return res.status(200).json({ success: true });
+      } catch (error) {
+        console.error("❌ Error sending message:", error);
+        return res.status(500).json({ error: "Failed to send message" });
+      }
     }
+
+    // No result case
+    return res.status(200).json({ success: true });
   } catch (error) {
     console.error("❌ Error in webhook route:", error);
-    if (!res.headersSent) {
-      res.status(500).send("Internal Server Error");
-    }
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 
