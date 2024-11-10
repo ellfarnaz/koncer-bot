@@ -19,12 +19,6 @@ app.use(bodyParser.json());
 // Routes
 app.post("/webhook", async (req, res) => {
   try {
-    // Log raw request untuk debugging
-    console.log("🔍 Raw webhook request:", {
-      body: req.body,
-      headers: req.headers,
-    });
-
     const messageData = {
       from: req.body.From || req.body.from,
       body: req.body.Body || req.body.message,
@@ -32,76 +26,48 @@ app.post("/webhook", async (req, res) => {
 
     console.log("📥 Incoming webhook:", messageData);
 
-    // Validasi pesan
+    // Check if message body exists
     if (!messageData.body) {
-      console.log("❌ Missing message body");
-      return res.status(400).json({
-        success: false,
-        error: "Missing message body",
-      });
+      console.log("Missing message body");
+      return res.status(400).json({ error: "Missing message body" });
     }
 
-    if (!messageData.from) {
-      console.log("❌ Missing sender information");
-      return res.status(400).json({
-        success: false,
-        error: "Missing sender information",
-      });
-    }
-
-    // Proses pesan melalui webhook controller
     const result = await webhookController.handleIncomingMessage(messageData);
 
-    // Jika ada hasil pemrosesan
+    // If we have a response
+    // If we have a response
     if (result) {
-      // Format pesan untuk logging
+      // Format log message properly
       const logMessage = typeof result === "object" ? result.message : result;
       console.log("📤 Sending response:", logMessage);
 
-      // Persiapkan response untuk Twilio
-      const twilioResponse = new MessagingResponse();
-
-      // Jika result adalah object dengan flag isNotification
+      // Jika response adalah object dengan isNotification true
       if (typeof result === "object" && result.isNotification) {
-        console.log("ℹ️ Notification response, skipping message send");
+        // Hanya kirim konfirmasi ke Twilio
         return res.status(200).json({
           success: true,
-          notification: true,
           message: result.message,
         });
       }
 
-      // Tambahkan pesan ke response Twilio
-      twilioResponse.message(typeof result === "object" ? result.message : result);
+      try {
+        // Send response via WhatsApp untuk non-notification
+        await sendWhatsAppMessage(messageData.from, typeof result === "object" ? result.message : result);
 
-      // Set header content type untuk response Twilio
-      res.setHeader("Content-Type", "text/xml");
-
-      // Kirim response
-      console.log("✅ Sending Twilio response");
-      return res.status(200).send(twilioResponse.toString());
+        // Send success response to Twilio
+        return res.status(200).json({ success: true });
+      } catch (error) {
+        console.error("❌ Error sending message:", error);
+        return res.status(500).json({ error: "Failed to send message" });
+      }
     }
 
-    // Jika tidak ada hasil pemrosesan, kirim acknowledgment
-    console.log("ℹ️ No response needed");
-    return res.status(200).json({
-      success: true,
-      message: "Processed successfully",
-    });
+    return res.status(200).json({ success: true });
   } catch (error) {
-    // Log error detail
-    console.error("❌ Error in webhook route:", {
-      message: error.message,
-      stack: error.stack,
-      details: error,
-    });
-
-    // Kirim error response
+    console.error("❌ Error in webhook route:", error);
     return res.status(500).json({
-      success: false,
       error: "Internal server error",
       message: error.message,
-      timeStamp: new Date().toISOString(),
     });
   }
 });
