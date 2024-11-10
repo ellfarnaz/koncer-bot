@@ -29,7 +29,9 @@ class WebhookController {
         // Try piket commands
         response = await piketController.handleCommand(body, from);
         if (response) {
-          console.log(`✅ Piket controller handled: ${response}`);
+          // Jika response adalah object, ambil message-nya untuk log
+          const logMessage = typeof response === "object" ? response.message : response;
+          console.log(`✅ Listrik controller handled: ${logMessage}`);
           return response;
         }
 
