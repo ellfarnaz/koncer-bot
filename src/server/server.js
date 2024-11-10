@@ -34,24 +34,24 @@ app.post("/webhook", async (req, res) => {
 
     const result = await webhookController.handleIncomingMessage(messageData);
 
+    // If we have a response
     if (result) {
       console.log("📤 Sending response:", result);
 
-      try {
-        // Send response via WhatsApp
-        await sendWhatsAppMessage(messageData.from, result);
+      // Jika response adalah object dengan isNotification true
+      if (typeof result === "object" && result.isNotification) {
+        // Hanya kirim konfirmasi ke Twilio
+        return res.status(200).json({ success: true });
+      }
 
-        // Send success response
-        return res.status(200).json({
-          success: true,
-          message: "Message processed successfully",
-        });
+      try {
+        // Send response via WhatsApp untuk non-notification
+        await sendWhatsAppMessage(messageData.from, typeof result === "object" ? result.message : result);
+        // Send success response to Twilio
+        return res.status(200).json({ success: true });
       } catch (error) {
         console.error("❌ Error sending message:", error);
-        return res.status(500).json({
-          error: "Failed to send message",
-          details: error.message,
-        });
+        return res.status(500).json({ error: "Failed to send message" });
       }
     }
 

@@ -14,13 +14,45 @@ class ListrikService {
       { nama: "Fatu", nomor: "whatsapp:+6289880266355" },
       { nama: "Rizky", nomor: "whatsapp:+6281396986145" },
     ];
+
+    // Initialize cache
+    this.cache = {
+      state: null,
+      lastPayment: null,
+      lastUpdate: null,
+    };
+    this.CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache TTL
+  }
+
+  async getStateAndPayment() {
+    const now = Date.now();
+    if (!this.cache.lastUpdate || now - this.cache.lastUpdate > this.CACHE_TTL) {
+      console.log("🔄 Cache miss, fetching from database...");
+      this.cache.state = await database.getListrikState();
+      this.cache.lastPayment = await database.getLastListrikPayment();
+      this.cache.lastUpdate = now;
+    } else {
+      console.log("✅ Using cached data");
+    }
+    return {
+      state: this.cache.state,
+      lastPayment: this.cache.lastPayment,
+    };
+  }
+
+  async invalidateCache() {
+    console.log("🔄 Invalidating cache...");
+    this.cache = {
+      state: null,
+      lastPayment: null,
+      lastUpdate: null,
+    };
   }
 
   async getNextPerson() {
     try {
-      const state = await database.getListrikState();
+      const { state, lastPayment } = await this.getStateAndPayment();
       // Jika belum ada state atau belum ada pembayaran, mulai dari Farel
-      const lastPayment = await database.getLastListrikPayment();
       if (!state || !lastPayment) {
         return {
           ...this.urutan[0],
@@ -41,15 +73,13 @@ class ListrikService {
   async getListrikStatusMessage() {
     try {
       console.log("Getting listrik status...");
-      const lastPayment = await database.getLastListrikPayment();
-      const state = await database.getListrikState();
+      const { state, lastPayment } = await this.getStateAndPayment();
 
       // Jika belum ada pembayaran, Farel adalah giliran pertama
       let currentIndex = -1; // Sehingga nextIndex akan menjadi 0 (Farel)
       if (lastPayment) {
         currentIndex = state.current_index;
       }
-
       const nextIndex = (currentIndex + 1) % this.urutan.length;
       const afterNextIndex = (nextIndex + 1) % this.urutan.length;
 
@@ -57,7 +87,7 @@ class ListrikService {
       let rotationList = "";
       this.urutan.forEach((person, index) => {
         const isNext = index === nextIndex;
-        const prefix = isNext ? "👉 " : "   ";
+        const prefix = isNext ? "👉 " : " ";
         rotationList += `${prefix}${index + 1}. ${person.nama}\n`;
       });
 
@@ -105,7 +135,11 @@ class ListrikService {
 
       await Promise.all(sendPromises);
 
-      return `✅ Notifikasi listrik habis telah dikirim ke semua penghuni\n` + `Giliran mengisi: ${nextPerson.nama}`;
+      // Return dengan flag untuk menandai bahwa ini notification
+      return {
+        message: `✅ Notifikasi listrik habis telah dikirim ke semua penghuni\n` + `Giliran mengisi: ${nextPerson.nama}`,
+        isNotification: true,
+      };
     } catch (error) {
       console.error("Error handling listrik empty:", error);
       throw error;
@@ -124,7 +158,6 @@ class ListrikService {
       if (lastPayment) {
         currentIndex = state.current_index;
       }
-
       const nextIndex = (currentIndex + 1) % this.urutan.length;
       const afterNextIndex = (nextIndex + 1) % this.urutan.length;
 
@@ -154,6 +187,9 @@ class ListrikService {
 
       // Execute database operations in parallel
       await Promise.all([database.recordListrikPayment(payerPhone, totalAmount), database.updateListrikState(nextIndex)]);
+
+      // Invalidate cache after successful payment
+      await this.invalidateCache();
 
       // Send notifications to all residents except payer in parallel
       const notificationPromises = this.urutan
