@@ -1,9 +1,38 @@
 require("dotenv").config();
 const localtunnel = require("localtunnel");
-const { startServer, config, formatRupiah, startScheduler } = require("./piketReminder");
+const { startServer } = require("./server");
 const { sendWhatsAppMessageNoDelay } = require("../services/messageService");
+const config = require("../config/config");
 const db = require("../data/database");
-const galonScheduler = require("../services/galonScheduler");
+const galonService = require("../services/galonService");
+const { formatRupiah } = require("../utils/formatter");
+const reminderService = require("../services/reminderService");
+const cron = require("node-cron");
+
+// Initialize scheduled tasks
+async function initializeScheduler() {
+  console.log("Initializing scheduler...");
+
+  // Schedule piket reminder at 7 AM Jakarta time
+  cron.schedule(
+    config.schedule.morningReminder,
+    async () => {
+      console.log("Running daily piket reminder check...");
+      const today = new Date();
+      const dayName = today.toLocaleDateString("en-US", { weekday: "long" });
+      const jadwal = config.piket.jadwal[dayName];
+
+      if (jadwal) {
+        reminderService.startRemindersForPerson(jadwal);
+      }
+    },
+    {
+      timezone: config.server.timezone,
+    }
+  );
+
+  console.log("✅ Scheduler initialized successfully!");
+}
 
 async function startLocaltunnelServer() {
   let server;
@@ -15,7 +44,7 @@ async function startLocaltunnelServer() {
 
     // Initialize galon state
     console.log("Initializing galon state...");
-    await galonScheduler.initialize();
+    await galonService.initialize();
     console.log("✅ Galon state initialized successfully!");
 
     // Start the main application
@@ -38,28 +67,24 @@ async function startLocaltunnelServer() {
     // Send initial message first without delays between messages
     console.log("Mengirim pesan inisial...");
     try {
-      const galonStatus = await galonScheduler.getGalonStatusMessage();
+      const galonStatus = await galonService.getGalonStatusMessage();
 
-      for (const number of config.allNumbers) {
+      for (const number of config.piket.allNumbers) {
         await sendWhatsAppMessageNoDelay(
           number,
           "👋 Halo! Saya adalah Bot Kontrakan Ceria.\n\n" +
             "Saya akan mengingatkan jadwal piket setiap hari pukul 07:00 WIB.\n" +
             "Untuk hari Minggu, kita akan bersama-sama menjaga kebersihan.\n\n" +
             `${galonStatus}\n\n` +
-            `Denda tidak piket: ${formatRupiah(config.dendaAmount)}\n\n` +
+            `Denda tidak piket: ${formatRupiah(config.piket.dendaAmount)}\n\n` +
             "Mari kita jaga kebersihan bersama! 🧹✨"
         );
         console.log(`✅ Pesan terkirim ke ${number}`);
       }
       console.log("✅ Semua pesan inisial terkirim!");
 
-      // Start scheduler after all initial messages with delay
-      console.log("Menunggu sebelum memulai sistem pengingat...");
-      setTimeout(() => {
-        console.log("Memulai sistem pengingat...");
-        startScheduler();
-      }, config.messageDelay);
+      // Initialize scheduler
+      await initializeScheduler();
     } catch (error) {
       console.error("❌ Error mengirim pesan inisial:", error);
     }

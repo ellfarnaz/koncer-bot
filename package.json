@@ -2,11 +2,15 @@
   "name": "bot-kontrakan-ceria",
   "version": "1.0.0",
   "description": "Bot WhatsApp Pengingat Kontrakan Ceria menggunakan Twilio",
-  "main": "src/server/piketReminder.js",
+  "main": "src/server/server.js",
   "scripts": {
     "start": "node src/server/server-localtunnel.js",
-    "dev": "node src/server/server-localtunnel.js",
-    "tunnel": "node src/server/server-localtunnel.js"
+    "dev": "nodemon src/server/server-localtunnel.js --ignore '*.json'",
+    "tunnel": "node src/server/server-localtunnel.js",
+    "serve": "node src/server/server.js",
+    "lint": "eslint src/**/*.js",
+    "test": "jest",
+    "migrate": "node src/data/database.js"
   },
   "dependencies": {
     "body-parser": "^1.20.3",
@@ -16,5 +20,26 @@
     "node-cron": "^3.0.3",
     "sqlite3": "^5.1.7",
     "twilio": "^4.23.0"
-  }
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.7"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ellfarnaz/koncer-bot.git"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "twilio",
+    "reminder",
+    "nodejs"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }

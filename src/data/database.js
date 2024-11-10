@@ -3,44 +3,164 @@ const path = require("path");
 
 const db = new sqlite3.Database(path.join(__dirname, "bot.db"));
 
+// Helper function untuk memastikan data piket lengkap
+async function ensurePiketData() {
+  const piketData = [
+    {
+      date: new Date("2024-11-04").toISOString().split("T")[0],
+      phoneNumber: "whatsapp:+6289519240711",
+      completed: 1,
+      nama: "Adzka",
+    },
+    {
+      date: new Date("2024-11-05").toISOString().split("T")[0],
+      phoneNumber: "whatsapp:+6289880266355",
+      completed: 1,
+      nama: "Fatu",
+    },
+    {
+      date: new Date("2024-11-06").toISOString().split("T")[0],
+      phoneNumber: "whatsapp:+6281396986145",
+      completed: 1,
+      nama: "Rizky",
+    },
+    {
+      date: new Date("2024-11-07").toISOString().split("T")[0],
+      phoneNumber: "whatsapp:+6285156820515",
+      completed: 1,
+      nama: "Farel",
+    },
+    {
+      date: new Date("2024-11-08").toISOString().split("T")[0],
+      phoneNumber: "whatsapp:+6281528976578",
+      completed: 0,
+      nama: "Max",
+    },
+    {
+      date: new Date("2024-11-09").toISOString().split("T")[0],
+      phoneNumber: "whatsapp:+6285179813641",
+      completed: 1,
+      nama: "Fillah",
+    },
+  ];
+
+  return new Promise((resolve, reject) => {
+    db.serialize(() => {
+      db.run("BEGIN TRANSACTION");
+      try {
+        piketData.forEach((data) => {
+          db.run(
+            `INSERT OR REPLACE INTO piket_tasks (date, phone_number, completed, created_at)
+             VALUES (?, ?, ?, datetime(?))`,
+            [data.date, data.phoneNumber, data.completed, data.date + " 07:00:00"]
+          );
+        });
+        db.run("COMMIT");
+        resolve();
+      } catch (error) {
+        db.run("ROLLBACK");
+        reject(error);
+      }
+    });
+  });
+}
+
+// Helper function untuk inisialisasi MAX
+async function initializeMaxData() {
+  const maxDate = new Date("2024-11-08").toISOString().split("T")[0];
+  const maxData = {
+    phoneNumber: "whatsapp:+6281528976578",
+    amount: 10000,
+  };
+
+  return new Promise((resolve, reject) => {
+    db.serialize(() => {
+      db.run("BEGIN TRANSACTION");
+      try {
+        // Insert incomplete piket task
+        db.run(
+          `INSERT OR REPLACE INTO piket_tasks 
+           (date, phone_number, completed, created_at) 
+           VALUES (?, ?, 0, datetime(?))`,
+          [maxDate, maxData.phoneNumber, maxDate + " 07:00:00"]
+        );
+
+        // Insert denda record
+        db.run(
+          `INSERT OR IGNORE INTO denda 
+           (phone_number, date, amount, created_at) 
+           VALUES (?, ?, ?, datetime(?))`,
+          [maxData.phoneNumber, maxDate, maxData.amount, maxDate + " 20:00:00"]
+        );
+
+        // Insert negative tabungan record
+        db.run(
+          `INSERT OR IGNORE INTO tabungan 
+           (amount, description, date, created_at) 
+           VALUES (?, ?, ?, datetime(?))`,
+          [-maxData.amount, `Denda piket Max (Belum dibayar) - ${maxDate}`, maxDate, maxDate + " 20:00:00"]
+        );
+
+        db.run("COMMIT", (err) => {
+          if (err) {
+            console.error("Error in MAX data transaction:", err);
+            reject(err);
+          } else {
+            console.log("✅ MAX data initialized successfully");
+            resolve();
+          }
+        });
+      } catch (error) {
+        console.error("Error initializing MAX data:", error);
+        db.run("ROLLBACK");
+        reject(error);
+      }
+    });
+  });
+}
 function initializeDatabase() {
   return new Promise((resolve, reject) => {
     console.log("Starting database initialization...");
 
-    db.serialize(() => {
-      db.run("BEGIN TRANSACTION");
+    // Fungsi untuk membuat tabel
+    const createTables = () => {
+      console.log("Creating tables if not exists...");
 
-      try {
-        console.log("Creating tables if not exists...");
-
-        // Piket table
-        db.run(`CREATE TABLE IF NOT EXISTS piket_tasks (
+      // Buat semua tabel yang diperlukan
+      const tables = [
+        `CREATE TABLE IF NOT EXISTS piket_tasks (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           date TEXT,
           phone_number TEXT,
           completed INTEGER DEFAULT 0,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(date, phone_number)
-        )`);
-
-        // Galon table
-        db.run(`CREATE TABLE IF NOT EXISTS galon_state (
+        )`,
+        `CREATE TABLE IF NOT EXISTS galon_state (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           current_index INTEGER DEFAULT 0,
           galon_atas_empty INTEGER DEFAULT 0,
           galon_bawah_empty INTEGER DEFAULT 0,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-        // Galon purchases table
-        db.run(`CREATE TABLE IF NOT EXISTS galon_purchases (
+        )`,
+        `CREATE TABLE IF NOT EXISTS galon_purchases (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           phone_number TEXT,
           purchase_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-        // Denda table with unique constraint
-        db.run(`CREATE TABLE IF NOT EXISTS denda (
+        )`,
+        `CREATE TABLE IF NOT EXISTS listrik_state (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          current_index INTEGER DEFAULT 0,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE TABLE IF NOT EXISTS listrik_payments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          phone_number TEXT NOT NULL,
+          amount INTEGER NOT NULL,
+          payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE TABLE IF NOT EXISTS denda (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           phone_number TEXT,
           date TEXT,
@@ -49,177 +169,107 @@ function initializeDatabase() {
           paid_date TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(phone_number, date)
-        )`);
-
-        // Tabungan table with unique constraint
-        db.run(`CREATE TABLE IF NOT EXISTS tabungan (
+        )`,
+        `CREATE TABLE IF NOT EXISTS tabungan (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           amount INTEGER,
           description TEXT,
           date TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(description, date)
-        )`);
+        )`,
+        `CREATE TABLE IF NOT EXISTS rekening (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          phone_number TEXT,
+          bank_name TEXT,
+          account_number TEXT,
+          account_name TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+      ];
 
-        // Initialize completed piket tasks (except Max)
-        console.log("Initializing piket completion data...");
-        const startDate = new Date("2024-11-04"); // Senin, 4 November 2024
-        const piketData = [
-          {
-            date: new Date("2024-11-04").toISOString().split("T")[0], // Senin
-            phoneNumber: "whatsapp:+6289519240711", // Adzka
-            completed: 1,
-            nama: "Adzka",
-          },
-          {
-            date: new Date("2024-11-05").toISOString().split("T")[0], // Selasa
-            phoneNumber: "whatsapp:+6289880266355", // Fatu
-            completed: 1,
-            nama: "Fatu",
-          },
-          {
-            date: new Date("2024-11-06").toISOString().split("T")[0], // Rabu
-            phoneNumber: "whatsapp:+6281396986145", // Rizky
-            completed: 1,
-            nama: "Rizky",
-          },
-          {
-            date: new Date("2024-11-07").toISOString().split("T")[0], // Kamis
-            phoneNumber: "whatsapp:+6285156820515", // Farel
-            completed: 1,
-            nama: "Farel",
-          },
-          // Max's data (Jumat, 2024-11-08) is not included since he didn't complete
-          {
-            date: new Date("2024-11-09").toISOString().split("T")[0], // Sabtu
-            phoneNumber: "whatsapp:+6285179813641", // Fillah
-            completed: 1,
-            nama: "Fillah",
-          },
-        ];
+      return new Promise((resolve, reject) => {
+        db.serialize(() => {
+          tables.forEach((sql) => {
+            db.run(sql, (err) => {
+              if (err) reject(err);
+            });
+          });
+          resolve();
+        });
+      });
+    };
 
-        // Insert piket completion data
-        console.log("Inserting piket completion records...");
-        for (const data of piketData) {
-          db.run(
-            `INSERT OR REPLACE INTO piket_tasks (date, phone_number, completed, created_at) 
-             VALUES (?, ?, ?, datetime(?))`,
-            [
-              data.date,
-              data.phoneNumber,
-              data.completed,
-              data.date + " 07:00:00", // Set creation time to 7 AM
-            ],
-            function (err) {
-              if (err) {
-                console.error(`Error inserting piket data for ${data.nama}:`, err);
-                throw err;
-              }
-              console.log(`✅ Inserted piket completion for ${data.nama} on ${data.date}`);
-            }
-          );
-        }
+    // Fungsi untuk inisialisasi data awal
+    const initializeData = async () => {
+      console.log("Initializing data...");
 
-        // Check and insert Max's denda record
-        console.log("Checking existing denda records...");
-        const maxDendaDate = new Date("2024-11-08").toISOString().split("T")[0];
-        db.get(
-          `SELECT COUNT(*) as count 
-           FROM denda 
-           WHERE phone_number = ? AND date = ?`,
-          ["whatsapp:+6281528976578", maxDendaDate],
-          (err, row) => {
-            if (err) throw err;
-
-            if (row.count === 0) {
-              console.log("Inserting Max's denda record...");
-              const dendaData = {
-                date: maxDendaDate,
-                phoneNumber: "whatsapp:+6281528976578",
-                amount: 10000,
-                description: "Denda piket Max (Belum dibayar) - 8 November 2024",
-              };
-
-              // Insert denda record
-              db.run(
-                `INSERT OR IGNORE INTO denda (phone_number, date, amount, created_at) 
-                 VALUES (?, ?, ?, datetime(?))`,
-                [
-                  dendaData.phoneNumber,
-                  dendaData.date,
-                  dendaData.amount,
-                  dendaData.date + " 20:00:00", // Set creation time to 8 PM
-                ],
-                function (err) {
-                  if (err) {
-                    console.error("Error inserting denda record:", err);
-                    throw err;
-                  }
-                  console.log("✅ Inserted denda record for Max");
-                }
-              );
-
-              // Insert corresponding tabungan record
-              db.run(
-                `INSERT OR IGNORE INTO tabungan (amount, description, date, created_at) 
-                 VALUES (?, ?, ?, datetime(?))`,
-                [-dendaData.amount, dendaData.description, dendaData.date, dendaData.date + " 20:00:00"],
-                function (err) {
-                  if (err) {
-                    console.error("Error inserting tabungan record:", err);
-                    throw err;
-                  }
-                  console.log("✅ Inserted tabungan record for Max's denda");
-                }
-              );
-            } else {
-              console.log("Max's denda record already exists, skipping insertion");
-            }
+      // Inisialisasi listrik state
+      await new Promise((resolve, reject) => {
+        console.log("Checking listrik state...");
+        db.get("SELECT * FROM listrik_state WHERE id = 1", (err, row) => {
+          if (err) reject(err);
+          if (!row) {
+            db.run("INSERT INTO listrik_state (id, current_index) VALUES (1, 5)", (err) => {
+              if (err) reject(err);
+              console.log("✅ Initialized listrik state with Farel as next person");
+              resolve();
+            });
+          } else {
+            console.log("Listrik state already initialized");
+            resolve();
           }
-        );
+        });
+      });
 
-        // Insert initial galon state if not exists
+      // Inisialisasi galon state
+      await new Promise((resolve, reject) => {
         console.log("Checking galon state...");
         db.get("SELECT * FROM galon_state LIMIT 1", (err, row) => {
-          if (err) throw err;
+          if (err) reject(err);
           if (!row) {
-            console.log("Initializing galon state...");
-            db.run("INSERT INTO galon_state (current_index, updated_at) VALUES (0, CURRENT_TIMESTAMP)", function (err) {
-              if (err) {
-                console.error("Error initializing galon state:", err);
-                throw err;
-              }
+            db.run("INSERT INTO galon_state (current_index) VALUES (0)", (err) => {
+              if (err) reject(err);
               console.log("✅ Initialized galon state");
+              resolve();
             });
           } else {
             console.log("Galon state already initialized");
+            resolve();
           }
         });
+      });
 
-        db.run("COMMIT", (err) => {
-          if (err) throw err;
-          console.log("✨ Database initialization completed successfully!");
-          console.log("-----------------------------------");
-          console.log("Summary:");
-          console.log("• Created all necessary tables");
-          console.log("• Initialized 5 piket completion records");
-          console.log("• Added Max's denda record");
-          console.log("• Setup galon state");
-          console.log("-----------------------------------");
-        });
-      } catch (error) {
+      // Inisialisasi data piket
+      await ensurePiketData();
+
+      // Inisialisasi data MAX
+      await initializeMaxData();
+    };
+
+    // Eksekusi semua inisialisasi secara berurutan
+    createTables()
+      .then(() => initializeData())
+      .then(() => {
+        console.log("✨ Database initialization completed successfully!");
+        console.log("-----------------------------------");
+        console.log("Summary:");
+        console.log("• Created all necessary tables");
+        console.log("• Initialized piket completion records");
+        console.log("• Initialized MAX's data");
+        console.log("• Initialized listrik state");
+        console.log("• Initialized galon state");
+        console.log("-----------------------------------");
+        resolve();
+      })
+      .catch((error) => {
         console.error("❌ Error during database initialization:", error);
-        db.run("ROLLBACK");
         reject(error);
-        return;
-      }
-    });
-
-    resolve();
+      });
   });
 }
 
-// [All existing functions remain the same...]
+// Piket-related functions
 function markTaskCompleted(phoneNumber, date) {
   return new Promise((resolve, reject) => {
     db.run(
@@ -248,6 +298,57 @@ function isTaskCompleted(phoneNumber, date) {
   });
 }
 
+function getLastWeekDates() {
+  const today = new Date();
+  const lastWeekStart = new Date(today);
+  lastWeekStart.setDate(today.getDate() - 7);
+  const lastWeekEnd = new Date(today);
+  lastWeekEnd.setDate(today.getDate() - 1);
+
+  return {
+    start: lastWeekStart.toISOString().split("T")[0],
+    end: lastWeekEnd.toISOString().split("T")[0],
+  };
+}
+
+function getLastWeekPiketTasks() {
+  return new Promise((resolve, reject) => {
+    const today = new Date();
+    const lastWeekStart = new Date(today);
+    lastWeekStart.setDate(today.getDate() - 7);
+    const lastWeekEnd = new Date(today);
+    lastWeekEnd.setDate(today.getDate() - 1);
+
+    const start = lastWeekStart.toISOString().split("T")[0];
+    const end = lastWeekEnd.toISOString().split("T")[0];
+
+    db.all(
+      `SELECT 
+        pt.*,
+        d.paid as denda_paid,
+        d.amount as denda_amount,
+        d.paid_date as denda_paid_date,
+        COALESCE(pt.completed, 0) as completed
+       FROM piket_tasks pt
+       LEFT JOIN denda d ON pt.date = d.date AND pt.phone_number = d.phone_number
+       WHERE pt.date BETWEEN ? AND ?
+       ORDER BY pt.date ASC`,
+      [start, end],
+      (err, rows) => {
+        if (err) {
+          console.error("Error getting last week piket tasks:", err);
+          reject(err);
+        } else {
+          // Log untuk debugging
+          console.log("Retrieved piket tasks:", rows);
+          resolve(rows);
+        }
+      }
+    );
+  });
+}
+
+// Galon-related functions
 function getGalonState() {
   return new Promise((resolve, reject) => {
     db.get("SELECT * FROM galon_state LIMIT 1", (err, row) => {
@@ -304,12 +405,13 @@ function getRecentPurchases() {
   });
 }
 
+// Denda-related functions
 function getDendaList() {
   return new Promise((resolve, reject) => {
     db.all(
       `SELECT d.*, p.completed
        FROM denda d
-       LEFT JOIN piket_tasks p ON d.date = p.date AND d.phone_number = p.phone_number
+       LEFT JOIN piket_tasks p ON d.date = p.date AND d.phone_number = d.phone_number
        WHERE d.paid = 0
        ORDER BY d.date ASC`,
       (err, rows) => {
@@ -334,7 +436,7 @@ function getDendaPaidList() {
     db.all(
       `SELECT d.*, p.completed
        FROM denda d
-       LEFT JOIN piket_tasks p ON d.date = p.date AND d.phone_number = p.phone_number
+       LEFT JOIN piket_tasks p ON d.date = d.date AND d.phone_number = d.phone_number
        WHERE d.paid = 1
        ORDER BY d.paid_date DESC`,
       (err, rows) => {
@@ -409,6 +511,183 @@ function updateTabungan(amount, description, date) {
   });
 }
 
+// Rekening-related functions
+function addRekening(phoneNumber, bankName, accountNumber, accountName) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO rekening (phone_number, bank_name, account_number, account_name) 
+       VALUES (?, ?, ?, ?)`,
+      [phoneNumber, bankName, accountNumber, accountName],
+      (err) => {
+        if (err) reject(err);
+        else resolve();
+      }
+    );
+  });
+}
+
+function getRekeningList() {
+  return new Promise((resolve, reject) => {
+    db.all(`SELECT * FROM rekening ORDER BY phone_number, bank_name`, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+}
+
+function getRekeningByPhone(phoneNumber) {
+  return new Promise((resolve, reject) => {
+    db.all(`SELECT * FROM rekening WHERE phone_number = ? ORDER BY bank_name`, [phoneNumber], (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+}
+
+function editRekening(phoneNumber, oldBankName, newBankName, newAccountNumber, newAccountName) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE rekening 
+       SET bank_name = ?, 
+           account_number = ?, 
+           account_name = ?,
+           created_at = CURRENT_TIMESTAMP
+       WHERE phone_number = ? AND bank_name = ?`,
+      [newBankName, newAccountNumber, newAccountName, phoneNumber, oldBankName],
+      (err) => {
+        if (err) reject(err);
+        else resolve();
+      }
+    );
+  });
+}
+
+// Listrik-related functions
+function getListrikState() {
+  return new Promise((resolve, reject) => {
+    db.get("SELECT * FROM listrik_state WHERE id = 1", (err, row) => {
+      if (err) {
+        console.error("Error getting listrik state:", err);
+        reject(err);
+      } else {
+        resolve(row);
+      }
+    });
+  });
+}
+
+function updateListrikState(currentIndex) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE listrik_state 
+       SET current_index = ?, 
+           updated_at = CURRENT_TIMESTAMP 
+       WHERE id = 1`,
+      [currentIndex],
+      (err) => {
+        if (err) {
+          console.error("Error updating listrik state:", err);
+          reject(err);
+        } else {
+          resolve();
+        }
+      }
+    );
+  });
+}
+
+function recordListrikPayment(phoneNumber, amount) {
+  return new Promise((resolve, reject) => {
+    db.run("INSERT INTO listrik_payments (phone_number, amount) VALUES (?, ?)", [phoneNumber, amount], (err) => {
+      if (err) {
+        console.error("Error recording listrik payment:", err);
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+function getLastListrikPayment() {
+  return new Promise((resolve, reject) => {
+    db.get("SELECT * FROM listrik_payments ORDER BY payment_date DESC LIMIT 1", (err, row) => {
+      if (err) {
+        console.error("Error getting last listrik payment:", err);
+        reject(err);
+      } else {
+        resolve(row);
+      }
+    });
+  });
+}
+
+// MAX-related functions
+function getMaxStatus() {
+  return new Promise((resolve, reject) => {
+    const maxDate = new Date("2024-11-08").toISOString().split("T")[0];
+    db.get(
+      `SELECT pt.*, d.paid as denda_paid, d.amount as denda_amount,
+              d.paid_date as denda_paid_date
+       FROM piket_tasks pt
+       LEFT JOIN denda d ON pt.date = d.date AND pt.phone_number = d.phone_number
+       WHERE pt.phone_number = ? AND pt.date = ?`,
+      ["whatsapp:+6281528976578", maxDate],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      }
+    );
+  });
+}
+
+function markMaxDendaPaid() {
+  return new Promise((resolve, reject) => {
+    const currentDate = new Date().toISOString().split("T")[0];
+    const maxDate = new Date("2024-11-08").toISOString().split("T")[0];
+    const maxData = {
+      phoneNumber: "whatsapp:+6281528976578",
+      amount: 10000,
+    };
+
+    db.serialize(() => {
+      db.run("BEGIN TRANSACTION");
+      try {
+        // Update denda status
+        db.run(
+          `UPDATE denda 
+           SET paid = 1, paid_date = ? 
+           WHERE phone_number = ? AND date = ?`,
+          [currentDate, maxData.phoneNumber, maxDate]
+        );
+
+        // Add positive transaction to tabungan
+        db.run(
+          `INSERT INTO tabungan 
+           (amount, description, date) 
+           VALUES (?, ?, ?)`,
+          [maxData.amount, `Pembayaran denda piket Max - ${currentDate}`, currentDate]
+        );
+
+        db.run("COMMIT", (err) => {
+          if (err) {
+            console.error("Error in MAX denda payment transaction:", err);
+            reject(err);
+          } else {
+            console.log("✅ MAX denda payment recorded successfully");
+            resolve();
+          }
+        });
+      } catch (error) {
+        console.error("Error marking MAX denda as paid:", error);
+        db.run("ROLLBACK");
+        reject(error);
+      }
+    });
+  });
+}
+
+// Export all functions
 module.exports = {
   initializeDatabase,
   markTaskCompleted,
@@ -419,8 +698,22 @@ module.exports = {
   getRecentPurchases,
   getDendaList,
   getTabungan,
-  getDendaPaidList, // Tambahkan ini
+  getDendaPaidList,
   markDendaPaid,
   addDendaRecord,
   updateTabungan,
+  addRekening,
+  getRekeningList,
+  getRekeningByPhone,
+  editRekening,
+  getListrikState,
+  updateListrikState,
+  recordListrikPayment,
+  getLastListrikPayment,
+  getLastWeekDates,
+  getLastWeekPiketTasks,
+  getMaxStatus,
+  initializeMaxData,
+  markMaxDendaPaid,
+  ensurePiketData,
 };
