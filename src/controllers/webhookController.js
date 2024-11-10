@@ -8,7 +8,6 @@ class WebhookController {
   async handleIncomingMessage(messageData) {
     try {
       const { from, body } = messageData;
-
       console.log("📥 Processing webhook:", {
         from: from,
         message: body,
@@ -21,7 +20,6 @@ class WebhookController {
       }
 
       console.log(`🔍 Processing message: "${body}" from ${from}`);
-
       let response;
 
       // Try each controller in sequence
@@ -29,30 +27,32 @@ class WebhookController {
         // Try piket commands
         response = await piketController.handleCommand(body, from);
         if (response) {
-          // Jika response adalah object, ambil message-nya untuk log
           const logMessage = typeof response === "object" ? response.message : response;
-          console.log(`✅ Listrik controller handled: ${logMessage}`);
+          console.log(`✅ Piket controller handled: ${logMessage}`);
           return response;
         }
 
         // Try listrik commands
         response = await listrikController.handleCommand(body, from);
         if (response) {
-          console.log(`✅ Listrik controller handled: ${response}`);
+          const logMessage = typeof response === "object" ? response.message : response;
+          console.log(`✅ Listrik controller handled: ${logMessage}`);
           return response;
         }
 
         // Try galon commands
         response = await galonController.handleCommand(body, from);
         if (response) {
-          console.log(`✅ Galon controller handled: ${response}`);
+          const logMessage = typeof response === "object" ? response.message : response;
+          console.log(`✅ Galon controller handled: ${logMessage}`);
           return response;
         }
 
         // Try rekening commands
         response = await rekeningController.handleCommand(body, from);
         if (response) {
-          console.log(`✅ Rekening controller handled: ${response}`);
+          const logMessage = typeof response === "object" ? response.message : response;
+          console.log(`✅ Rekening controller handled: ${logMessage}`);
           return response;
         }
 

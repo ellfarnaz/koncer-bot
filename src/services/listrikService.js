@@ -128,21 +128,62 @@ class ListrikService {
   async handleListrikEmpty(senderPhone) {
     try {
       const nextPerson = await this.getNextPerson();
-      const message = `⚡ PERINGATAN LISTRIK HABIS!\n\n` + `Listrik telah habis.\n` + `Giliran mengisi: ${nextPerson.nama}\n\n` + `Mohon segera isi token listrik untuk menghindari pemadaman. 🙏`;
 
-      // Kirim notifikasi secara parallel menggunakan Promise.all
-      const sendPromises = this.urutan.filter((person) => person.nomor !== senderPhone).map((person) => messageService.sendWhatsAppMessageNoDelay(person.nomor, message));
+      // Get sender's name
+      const sender = this.urutan.find((p) => p.nomor === senderPhone)?.nama || "Unknown";
 
+      // Pesan untuk semua penghuni
+      const groupMessage = `⚡ PERINGATAN LISTRIK HABIS!\n\n` + `Dilaporkan oleh: ${sender}\n` + `Listrik telah habis.\n` + `Giliran mengisi: ${nextPerson.nama}\n\n` + `Mohon segera isi token listrik untuk menghindari pemadaman. 🙏`;
+
+      // Pesan khusus untuk yang dapat giliran
+      const turnMessage =
+        `⚡ PERINGATAN LISTRIK HABIS!\n\n` +
+        `Dilaporkan oleh: ${sender}\n\n` +
+        `Anda mendapat giliran untuk mengisi listrik.\n\n` +
+        `Setelah mengisi, gunakan perintah:\n` +
+        `sudah bayar listrik <nominal>\n` +
+        `Contoh: sudah bayar listrik 250000`;
+
+      // Array untuk menyimpan promise pengiriman pesan
+      const sendPromises = [];
+
+      // Kirim pesan ke semua penghuni kecuali pengirim dan yang dapat giliran
+      this.urutan.forEach((person) => {
+        if (person.nomor !== senderPhone) {
+          if (person.nomor === nextPerson.nomor) {
+            // Kirim pesan khusus ke yang dapat giliran
+            sendPromises.push(messageService.sendWhatsAppMessageNoDelay(person.nomor, turnMessage));
+          } else {
+            // Kirim pesan umum ke penghuni lain
+            sendPromises.push(messageService.sendWhatsAppMessageNoDelay(person.nomor, groupMessage));
+          }
+        }
+      });
+
+      // Tunggu semua pesan terkirim
       await Promise.all(sendPromises);
 
-      // Return dengan flag untuk menandai bahwa ini notification
+      // Siapkan pesan konfirmasi untuk pengirim
+      let confirmationMessage;
+      if (senderPhone === nextPerson.nomor) {
+        confirmationMessage =
+          `✅ Notifikasi listrik habis telah dikirim ke semua penghuni\n` +
+          `Giliran mengisi: ${nextPerson.nama}\n\n` +
+          `Anda mendapat giliran untuk mengisi listrik.\n` +
+          `Silakan mengisi dan laporkan dengan format:\n` +
+          `sudah bayar listrik <nominal>`;
+      } else {
+        confirmationMessage = `✅ Notifikasi listrik habis telah dikirim ke semua penghuni\n` + `Giliran mengisi: ${nextPerson.nama}\n\n` + `Mohon tunggu ${nextPerson.nama} untuk mengisi listrik.`;
+      }
+
+      // Return dengan flag notification
       return {
-        message: `✅ Notifikasi listrik habis telah dikirim ke semua penghuni\n` + `Giliran mengisi: ${nextPerson.nama}`,
+        message: confirmationMessage,
         isNotification: true,
       };
     } catch (error) {
       console.error("Error handling listrik empty:", error);
-      throw error;
+      throw new Error("Gagal mengirim notifikasi listrik habis: " + error.message);
     }
   }
 
@@ -174,7 +215,73 @@ class ListrikService {
         throw new Error(`Bukan giliran Anda untuk membayar listrik.\nSekarang giliran: ${nextPerson.nama}`);
       }
 
-      // ... kode pembayaran yang sudah ada ...
+      // Get current state and last payment in parallel
+      const [state, lastPayment] = await Promise.all([database.getListrikState(), database.getLastListrikPayment()]);
+
+      // Tentukan current_index berdasarkan kondisi
+      let currentIndex = -1; // Default untuk pembayaran pertama
+      if (lastPayment) {
+        currentIndex = state.current_index;
+      }
+      const nextIndex = (currentIndex + 1) % this.urutan.length;
+      const afterNextIndex = (nextIndex + 1) % this.urutan.length;
+
+      // Get payer info and calculate amount
+      const payerName = this.urutan.find((p) => p.nomor === payerPhone)?.nama || "Unknown";
+      const amountPerPerson = Math.ceil(totalAmount / this.urutan.length);
+
+      // Get rekening info in parallel with database operations
+      const rekeningList = await database.getRekeningByPhone(payerPhone);
+
+      // Prepare rekening info string
+      let rekeningInfo = "";
+      if (rekeningList && rekeningList.length > 0) {
+        const rek = rekeningList[0];
+        rekeningInfo = `\n\nTransfer ke:\n${rek.bank_name}\n${rek.account_number}\na.n ${rek.account_name}`;
+      }
+
+      // Prepare notification message
+      const message =
+        `💡 Informasi Tagihan Listrik\n\n` +
+        `Total tagihan: ${formatRupiah(totalAmount)}\n` +
+        `Pembayaran per orang: ${formatRupiah(amountPerPerson)}\n` +
+        `Dibayar oleh: ${payerName}${rekeningInfo}\n\n` +
+        `Giliran: ${this.urutan[nextIndex].nama}\n` +
+        `Selanjutnya: ${this.urutan[afterNextIndex].nama}\n\n` +
+        `Silakan transfer ke yang sudah membayar 🙏`;
+
+      // Execute database operations in parallel
+      await Promise.all([database.recordListrikPayment(payerPhone, totalAmount), database.updateListrikState(nextIndex)]);
+
+      // Invalidate cache after successful payment
+      await this.invalidateCache();
+
+      // Send notifications to all residents except payer in parallel
+      const notificationPromises = this.urutan
+        .filter((person) => person.nomor !== payerPhone)
+        .map((person) => {
+          console.log(`📤 Sending notification to ${person.nama}`);
+          return messageService.sendWhatsAppMessageNoDelay(person.nomor, message).catch((error) => {
+            console.error(`❌ Failed to send notification to ${person.nama}:`, error);
+            return false;
+          });
+        });
+
+      // Wait for all notifications to be sent
+      const results = await Promise.all(notificationPromises);
+
+      // Count successful notifications
+      const successCount = results.filter((result) => result === true).length;
+
+      // Prepare response message
+      const response =
+        `✅ Pembayaran listrik sebesar ${formatRupiah(totalAmount)} telah dicatat\n` +
+        `📲 Notifikasi telah dikirim ke ${successCount} penghuni\n\n` +
+        `Giliran: ${this.urutan[nextIndex].nama}\n` +
+        `Selanjutnya: ${this.urutan[afterNextIndex].nama}`;
+
+      console.log(`✅ Payment processing completed for ${payerName}`);
+      return response;
     } catch (error) {
       console.error("❌ Error handling listrik payment:", error);
       throw error;
