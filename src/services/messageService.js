@@ -27,9 +27,7 @@ async function sendWhatsAppMessage(to, message) {
       body: message,
     });
     console.log("Message sent:", response.sid);
-    await new Promise((resolve) =>
-      setTimeout(resolve, appConfig.schedule.messageDelay)
-    );
+    await new Promise((resolve) => setTimeout(resolve, appConfig.schedule.messageDelay));
     return true;
   } catch (error) {
     console.error("Error sending message:", error);

@@ -12,9 +12,9 @@
     "body-parser": "^1.20.3",
     "dotenv": "^16.3.1",
     "express": "^4.21.1",
+    "localtunnel": "^2.0.2",
     "node-cron": "^3.0.3",
-    "twilio": "^4.23.0",
-    "localtunnel": "^2.0.2"
-  },
-  "devDependencies": {}
+    "sqlite3": "^5.1.7",
+    "twilio": "^4.23.0"
+  }
 }

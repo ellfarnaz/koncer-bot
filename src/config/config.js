@@ -15,10 +15,10 @@ const config = {
   // Schedule Configuration
   schedule: {
     // Format: "MM HH * * *" (Menit Jam * * *)
-    morningReminder: "0 7 * * *",
-    dendaCheck: "0 0 * * *",
-    reminderInterval: 90 * 60 * 1000,
-    messageDelay: 15000,
+    morningReminder: "0 7 * * *", // Setiap hari jam 7 pagi
+    dendaCheck: "0 0 * * *", // Setiap tengah malam
+    reminderInterval: 90 * 60 * 1000, // 90 menit
+    messageDelay: 15000, // 15 detik
   },
 
   // Piket Configuration
@@ -34,14 +34,18 @@ const config = {
       Sabtu: { nama: "Fillah", nomor: "whatsapp:+6285179813641" },
     },
     // List semua nomor untuk broadcast
-    allNumbers: [
-      "whatsapp:+6289519240711",
-      "whatsapp:+6289880266355",
-      "whatsapp:+6281396986145",
-      "whatsapp:+6285156820515",
-      "whatsapp:+6281528976578",
-      "whatsapp:+6285179813641",
-    ],
+    allNumbers: ["whatsapp:+6289519240711", "whatsapp:+6289880266355", "whatsapp:+6281396986145", "whatsapp:+6285156820515", "whatsapp:+6281528976578", "whatsapp:+6285179813641"],
+  },
+
+  // Format tanggal
+  dateFormat: {
+    locale: "id-ID",
+    options: {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    },
   },
 };
 
