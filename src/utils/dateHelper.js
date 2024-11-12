@@ -20,8 +20,27 @@ function getDateForDay(date, targetDay) {
   return d;
 }
 
+// Fungsi baru untuk mendapatkan tanggal minggu ini
+function getCurrentWeekDates() {
+  const today = new Date();
+  const currentDay = today.getDay();
+  const diff = today.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
+
+  const monday = new Date(today.setDate(diff));
+  const dates = [];
+
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + i);
+    dates.push(date);
+  }
+
+  return dates;
+}
+
 module.exports = {
   days,
   getIndonesianDay,
   getDateForDay,
+  getCurrentWeekDates,
 };

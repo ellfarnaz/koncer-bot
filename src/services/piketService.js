@@ -1,17 +1,29 @@
 const db = require("../data/database");
 const { formatRupiah } = require("../utils/formatter");
 const config = require("../config/config");
-const { getDateForDay } = require("../utils/dateHelper");
+const { getDateForDay, getCurrentWeekDates } = require("../utils/dateHelper");
 
 class PiketService {
-  async isTaskCompleted(phoneNumber, date) {
-    const checkDate = date || new Date().toISOString().split("T")[0];
-    return await db.isTaskCompleted(phoneNumber, checkDate);
+  // Tambahkan state management
+  constructor() {
+    this.cache = {
+      scheduleList: null,
+      lastUpdate: null,
+    };
+    this.CACHE_TTL = 5 * 60 * 1000; // 5 menit
   }
 
-  async markTaskCompleted(phoneNumber) {
-    const today = new Date().toISOString().split("T")[0];
-    await db.markTaskCompleted(phoneNumber, today);
+  // Helper function untuk menentukan status icon
+  getStatusIcon(task) {
+    if (!task) return "⭕";
+    return task.completed ? "✅" : task.hasDenda ? (task.dendaPaid ? "💰" : "❌") : "❌";
+  }
+
+  // Helper function untuk mendapatkan tanggal minggu depan
+  getNextWeekDate(baseDate, dayIndex) {
+    const date = new Date(baseDate);
+    date.setDate(date.getDate() + dayIndex + 7);
+    return date;
   }
 
   async getPiketScheduleMessage() {
@@ -23,91 +35,120 @@ class PiketService {
       const lastWeekTasks = await db.getLastWeekPiketTasks();
       console.log("Retrieved tasks from database:", lastWeekTasks);
 
-      // Create a Map for easy lookup of task status
-      const taskMap = new Map();
-      lastWeekTasks.forEach((task) => {
-        taskMap.set(task.phone_number, {
-          completed: task.completed === 1,
-          hasDenda: task.denda_amount !== null,
-          dendaPaid: task.denda_paid === 1,
-          date: task.date,
-        });
-      });
-
-      // Get first task date from database to determine the year
-      const firstTask = lastWeekTasks[0];
-      const baseDate = firstTask ? new Date(firstTask.date) : new Date();
-      const year = baseDate.getFullYear();
-
-      // Get schedule for display
-      const scheduleList = [];
-      for (const [hari, jadwal] of Object.entries(config.piket.jadwal)) {
-        const task = taskMap.get(jadwal.nomor);
-
-        // Last week status
-        let lastWeekStatus = "";
-        if (task) {
-          const statusIcon = task.completed ? "✅" : task.hasDenda ? (task.dendaPaid ? "💰" : "❌") : "❌";
-          const taskDate = new Date(task.date);
-          lastWeekStatus = `${statusIcon} ${hari}, ${taskDate.getDate()} Nov ${year}: ${jadwal.nama}\n`;
-        }
-
-        // Next week dates
-        // Use the same year as in database
-        const nextWeekBase = new Date(year, 10, 1); // November (10) of the database year
-        const currentDay = Object.keys(config.piket.jadwal).indexOf(hari);
-        const nextWeekDate = new Date(nextWeekBase);
-        nextWeekDate.setDate(nextWeekBase.getDate() + currentDay + 7); // Add 7 days for next week
-
-        let nextWeekStatus = "";
-        const englishDay = {
-          Senin: "Monday",
-          Selasa: "Tuesday",
-          Rabu: "Wednesday",
-          Kamis: "Thursday",
-          Jumat: "Friday",
-          Sabtu: "Saturday",
-          Minggu: "Sunday",
-        }[hari];
-
-        const isToday = currentDayName === englishDay;
-        const statusIcon = isToday ? "⏰" : "⭕";
-        nextWeekStatus = `${statusIcon} ${hari}, ${nextWeekDate.getDate()} Nov ${year}: ${jadwal.nama}`;
-
-        scheduleList.push({
-          lastWeek: lastWeekStatus,
-          nextWeek: nextWeekStatus,
-          isToday: isToday,
-        });
+      // Validasi data minggu lalu
+      if (!lastWeekTasks || lastWeekTasks.length === 0) {
+        throw new Error("Tidak ada data piket minggu lalu");
       }
 
-      // Build message
-      let message = `📅 *JADWAL PIKET ${config.piket.kontrakanName}*\n\n`;
+      // Create a Map for easy lookup of task status
+      const taskMap = new Map(
+        lastWeekTasks.map((task) => [
+          task.phone_number,
+          {
+            completed: task.completed === 1,
+            hasDenda: task.denda_amount !== null,
+            dendaPaid: task.denda_paid === 1,
+            date: task.date,
+          },
+        ])
+      );
 
-      message += "*📅 Minggu Lalu:*\n";
-      scheduleList.forEach((item) => {
-        if (item.lastWeek) message += item.lastWeek;
-      });
+      // Get schedule for display
+      const scheduleList = await Promise.all(
+        Object.entries(config.piket.jadwal).map(async ([hari, jadwal]) => {
+          const task = taskMap.get(jadwal.nomor);
 
-      message += "\n*📅 Minggu Depan:*\n";
-      scheduleList.forEach((item) => {
-        if (item.nextWeek) message += item.nextWeek + "\n";
-      });
+          // Last week status
+          const lastWeekStatus = task
+            ? {
+                date: new Date(task.date),
+                status: this.getStatusIcon(task),
+                nama: jadwal.nama,
+              }
+            : null;
 
-      message += "\n*Keterangan:*\n";
-      message += "✅ = Sudah Selesai\n";
-      message += "❌ = Belum/Tidak Piket\n";
-      message += "💰 = Sudah Bayar Denda\n";
-      message += "⭕ = Jadwal Minggu Depan\n";
-      message += "⏰ = Jadwal Hari Ini\n\n";
-      message += "*Ketik 'sudah piket' untuk konfirmasi*";
+          // Next week dates - menggunakan tanggal dinamis
+          const nextWeekDate = this.getNextWeekDate(today, Object.keys(config.piket.jadwal).indexOf(hari));
+          const nextWeekTask = await db.getPiketTask(jadwal.nomor, nextWeekDate);
 
-      return message;
+          const isToday = currentDayName === this.getDayNameInEnglish(hari);
+          const statusIcon = isToday ? "⏰" : this.getStatusIcon(nextWeekTask);
+
+          return {
+            hari,
+            lastWeek: lastWeekStatus,
+            nextWeek: {
+              date: nextWeekDate,
+              status: statusIcon,
+              nama: jadwal.nama,
+            },
+            isToday,
+          };
+        })
+      );
+
+      return this.buildScheduleMessage(scheduleList);
     } catch (error) {
       console.error("Error getting piket schedule:", error);
-      console.error(error.stack);
-      return "❌ Error: Tidak dapat mengambil jadwal piket";
+      throw new Error(`Gagal mengambil jadwal piket: ${error.message}`);
     }
+  }
+
+  // Helper function untuk membangun pesan jadwal
+  buildScheduleMessage(scheduleList) {
+    let message = `📅 *JADWAL PIKET ${config.piket.kontrakanName}*\n\n`;
+
+    message += "*📅 Minggu Lalu:*\n";
+    scheduleList.forEach(({ lastWeek, hari }) => {
+      if (lastWeek) {
+        message += `${lastWeek.status} ${hari}, ${lastWeek.date.getDate()} ${lastWeek.date.toLocaleString("id-ID", { month: "short" })} ${lastWeek.date.getFullYear()}: ${lastWeek.nama}\n`;
+      }
+    });
+
+    message += "\n*📅 Minggu Depan:*\n";
+    scheduleList.forEach(({ nextWeek, hari }) => {
+      message += `${nextWeek.status} ${hari}, ${nextWeek.date.getDate()} ${nextWeek.date.toLocaleString("id-ID", { month: "short" })} ${nextWeek.date.getFullYear()}: ${nextWeek.nama}\n`;
+    });
+
+    message += this.getLegendMessage();
+    return message;
+  }
+
+  // Helper function untuk mendapatkan pesan legenda
+  getLegendMessage() {
+    return `
+*Keterangan:*
+✅ = Sudah Selesai
+❌ = Belum/Tidak Piket
+💰 = Sudah Bayar Denda
+⭕ = Jadwal Minggu Depan
+⏰ = Jadwal Hari Ini
+
+*Ketik 'sudah piket' untuk konfirmasi*`;
+  }
+
+  // Helper function untuk konversi nama hari ke bahasa Inggris
+  getDayNameInEnglish(indonesianDay) {
+    const dayMapping = {
+      Senin: "Monday",
+      Selasa: "Tuesday",
+      Rabu: "Wednesday",
+      Kamis: "Thursday",
+      Jumat: "Friday",
+      Sabtu: "Saturday",
+      Minggu: "Sunday",
+    };
+    return dayMapping[indonesianDay];
+  }
+
+  async isTaskCompleted(phoneNumber, date) {
+    const checkDate = date || new Date().toISOString().split("T")[0];
+    return await db.isTaskCompleted(phoneNumber, checkDate);
+  }
+
+  async markTaskCompleted(phoneNumber) {
+    const today = new Date().toISOString().split("T")[0];
+    await db.markTaskCompleted(phoneNumber, today);
   }
 
   async getDendaMessage() {
@@ -179,8 +220,6 @@ class PiketService {
     }
   }
 
-  // Previous methods remain unchanged until getHelpMessage()
-
   getHelpMessage() {
     return `🤖 *BOT KONTRAKAN CERIA* 🏠
     
@@ -232,6 +271,43 @@ class PiketService {
   • Konfirmasi setelah piket
   • Bayar denda tepat waktu
   • Cek nomor rekening sebelum transfer`;
+  }
+
+  // Tambahkan validasi dan notifikasi
+  async markTaskAsCompleted(phoneNumber, date) {
+    try {
+      const task = await db.getPiketTask(phoneNumber, date);
+      if (!task) {
+        throw new Error("Tugas piket tidak ditemukan");
+      }
+
+      // Validasi waktu
+      const taskDate = new Date(task.date);
+      const now = new Date();
+      if (taskDate.toDateString() !== now.toDateString()) {
+        throw new Error("Hanya bisa konfirmasi piket untuk hari ini");
+      }
+
+      await db.markPiketTaskCompleted(phoneNumber, date);
+
+      // Notifikasi ke grup
+      await this.sendGroupNotification(`✅ ${task.nama} telah menyelesaikan piket untuk ${formatDate(date)}`);
+
+      return true;
+    } catch (error) {
+      console.error("Error marking task as completed:", error);
+      throw error;
+    }
+  }
+
+  // Tambahkan sistem backup dan recovery
+  async backupPiketData() {
+    try {
+      const data = await db.getAllPiketTasks();
+      // Implementasi backup ke cloud storage atau file sistem
+    } catch (error) {
+      console.error("Error backing up piket data:", error);
+    }
   }
 }
 

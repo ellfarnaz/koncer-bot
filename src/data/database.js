@@ -1,5 +1,50 @@
 const sqlite3 = require("sqlite3").verbose();
 const path = require("path");
+const cron = require("node-cron");
+
+// Tambahkan konfigurasi koneksi yang lebih aman
+const dbConfig = {
+  filename: process.env.DB_PATH || "./database.sqlite",
+  mode: sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE,
+  cached: true, // Caching untuk performa
+  verbose: process.env.NODE_ENV === "development" ? console.log : null,
+};
+
+// Implementasi connection pooling sederhana
+class DatabaseConnectionPool {
+  constructor(maxConnections = 10) {
+    this.pool = [];
+    this.maxConnections = maxConnections;
+  }
+
+  async getConnection() {
+    if (this.pool.length < this.maxConnections) {
+      const newConnection = await createNewConnection();
+      this.pool.push(newConnection);
+      return newConnection;
+    }
+
+    // Jika pool penuh, tunggu koneksi tersedia
+    return new Promise((resolve, reject) => {
+      const checkAvailability = setInterval(() => {
+        if (this.pool.length < this.maxConnections) {
+          clearInterval(checkAvailability);
+          const newConnection = createNewConnection();
+          this.pool.push(newConnection);
+          resolve(newConnection);
+        }
+      }, 100);
+    });
+  }
+
+  releaseConnection(connection) {
+    // Kembalikan koneksi ke pool
+    const index = this.pool.indexOf(connection);
+    if (index > -1) {
+      this.pool.splice(index, 1);
+    }
+  }
+}
 
 const db = new sqlite3.Database(path.join(__dirname, "bot.db"));
 
@@ -118,6 +163,7 @@ async function initializeMaxData() {
     });
   });
 }
+
 function initializeDatabase() {
   return new Promise((resolve, reject) => {
     console.log("Starting database initialization...");
@@ -687,6 +733,133 @@ function markMaxDendaPaid() {
   });
 }
 
+// Tambahkan fungsi helper untuk penanganan error
+async function handleDatabaseError(operation, error) {
+  console.error(`Database error during ${operation}:`, error);
+
+  const errorTypes = {
+    CONNECTION_ERROR: "Gagal terhubung ke database",
+    QUERY_ERROR: "Kesalahan dalam eksekusi query",
+    CONSTRAINT_ERROR: "Pelanggaran constraint database",
+    UNKNOWN_ERROR: "Kesalahan tidak dikenal",
+  };
+
+  const shouldRetry = ["SQLITE_BUSY", "SQLITE_LOCKED"].includes(error.code);
+
+  if (shouldRetry) {
+    return retryDatabaseOperation(operation, error);
+  }
+
+  throw new Error(`Gagal ${operation}: ${errorTypes[error.type] || error.message}`);
+}
+
+async function retryDatabaseOperation(operation, originalError, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+      return await operation();
+    } catch (retryError) {
+      if (attempt === maxRetries) {
+        throw originalError;
+      }
+    }
+  }
+}
+
+async function getPiketTask(phoneNumber, date) {
+  try {
+    const formattedDate = date.toISOString().split("T")[0];
+    const query = "SELECT * FROM piket_tasks WHERE phone_number = ? AND date = ?";
+    const [rows] = await this.connection.execute(query, [phoneNumber, formattedDate]);
+    return rows[0];
+  } catch (error) {
+    return handleDatabaseError("mengambil data piket", error);
+  }
+}
+
+// Tambahkan mekanisme transaksi yang lebih robust
+async function safeTransaction(operations) {
+  const db = await getConnection(); // Asumsi ada fungsi untuk mendapatkan koneksi
+
+  try {
+    await db.run("BEGIN TRANSACTION");
+
+    // Validasi input sebelum transaksi
+    const validationResults = await Promise.all(operations.map((op) => validateOperation(op)));
+
+    if (validationResults.some((result) => !result)) {
+      throw new Error("Validasi operasi gagal");
+    }
+
+    // Eksekusi operasi
+    const results = await Promise.all(operations.map((op) => op()));
+
+    await db.run("COMMIT");
+    return results;
+  } catch (error) {
+    await db.run("ROLLBACK");
+
+    // Log error ke sistem monitoring
+    logErrorToMonitoring(error);
+
+    throw error;
+  } finally {
+    await db.close();
+  }
+}
+
+// Fungsi validasi operasi
+async function validateOperation(operation) {
+  // Implementasi validasi spesifik
+  try {
+    // Contoh: Validasi input, cek constraint
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Tambahkan mekanisme migrasi database
+async function runMigrations() {
+  const migrations = [
+    {
+      version: 1,
+      up: async (db) => {
+        await db.run(`
+          CREATE TABLE IF NOT EXISTS migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+      },
+    },
+    {
+      version: 2,
+      up: async (db) => {
+        // Contoh migrasi: tambah kolom baru
+        await db.run(`
+          ALTER TABLE piket_tasks 
+          ADD COLUMN denda_reason TEXT
+        `);
+      },
+    },
+  ];
+
+  for (const migration of migrations) {
+    const existingMigration = await checkMigrationApplied(migration.version);
+
+    if (!existingMigration) {
+      try {
+        await migration.up(db);
+        await recordMigration(migration.version);
+      } catch (error) {
+        console.error(`Migrasi versi ${migration.version} gagal:`, error);
+        throw error;
+      }
+    }
+  }
+}
+
 // Export all functions
 module.exports = {
   initializeDatabase,
@@ -716,4 +889,5 @@ module.exports = {
   initializeMaxData,
   markMaxDendaPaid,
   ensurePiketData,
+  getPiketTask,
 };

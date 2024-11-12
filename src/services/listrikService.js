@@ -20,6 +20,7 @@ class ListrikService {
       state: null,
       lastPayment: null,
       lastUpdate: null,
+      usageHistory: [],
     };
     this.CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache TTL
   }
@@ -46,6 +47,7 @@ class ListrikService {
       state: null,
       lastPayment: null,
       lastUpdate: null,
+      usageHistory: [],
     };
   }
 
@@ -285,6 +287,38 @@ class ListrikService {
     } catch (error) {
       console.error("❌ Error handling listrik payment:", error);
       throw error;
+    }
+  }
+
+  // Tambahkan tracking penggunaan listrik
+  async recordUsage(amount, month) {
+    try {
+      const usage = {
+        amount,
+        month,
+        averagePerPerson: amount / this.urutan.length,
+        timestamp: new Date(),
+      };
+
+      await database.addListrikUsage(usage);
+      this.updateUsageStatistics(usage);
+    } catch (error) {
+      console.error("Error recording listrik usage:", error);
+      throw error;
+    }
+  }
+
+  // Tambahkan sistem reminder otomatis
+  async checkAndSendReminders() {
+    try {
+      const { state, lastPayment } = await this.getStateAndPayment();
+      const daysSinceLastPayment = this.calculateDaysSinceLastPayment(lastPayment);
+
+      if (daysSinceLastPayment > 25) {
+        await this.sendPaymentReminders();
+      }
+    } catch (error) {
+      console.error("Error checking listrik reminders:", error);
     }
   }
 }

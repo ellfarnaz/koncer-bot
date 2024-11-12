@@ -1,7 +1,7 @@
 require("dotenv").config();
 const localtunnel = require("localtunnel");
 const { startServer } = require("./server");
-const { sendWhatsAppMessageNoDelay } = require("../services/messageService");
+const messageService = require("../services/messageService");
 const config = require("../config/config");
 const db = require("../data/database");
 const galonService = require("../services/galonService");
@@ -70,7 +70,7 @@ async function startLocaltunnelServer() {
       const galonStatus = await galonService.getGalonStatusMessage();
 
       for (const number of config.piket.allNumbers) {
-        await sendWhatsAppMessageNoDelay(
+        await messageService.sendWhatsAppMessageNoDelay(
           number,
           "👋 Halo! Saya adalah Bot Kontrakan Ceria.\n\n" +
             "Saya akan mengingatkan jadwal piket setiap hari pukul 07:00 WIB.\n" +

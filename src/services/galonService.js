@@ -14,6 +14,8 @@ class GalonService {
         atas: null,
         bawah: null,
       },
+      lastPurchase: null,
+      purchaseHistory: [],
     };
   }
 
@@ -187,6 +189,84 @@ class GalonService {
       }
     } catch (error) {
       console.error("Error sending galon reminder:", error);
+      throw error;
+    }
+  }
+
+  async markGalonFilled(location) {
+    try {
+      this.state.isGalonEmpty[location] = false;
+      await db.updateGalonState(this.state);
+      return true;
+    } catch (error) {
+      console.error("Error marking galon filled:", error);
+      throw error;
+    }
+  }
+
+  async stopGalonReminder(location) {
+    try {
+      if (this.state.activeReminders[location]) {
+        clearInterval(this.state.activeReminders[location]);
+        this.state.activeReminders[location] = null;
+        await db.updateGalonState(this.state);
+      }
+    } catch (error) {
+      console.error("Error stopping galon reminder:", error);
+      throw error;
+    }
+  }
+
+  async updateCurrentIndex() {
+    try {
+      this.state.currentIndex = (this.state.currentIndex + 1) % config.galon.schedule.length;
+      await db.updateGalonState(this.state);
+    } catch (error) {
+      console.error("Error updating current index:", error);
+      throw error;
+    }
+  }
+
+  async recordGalonPurchase(buyer) {
+    try {
+      const purchase = {
+        buyer: buyer,
+        date: new Date().toISOString(),
+      };
+      await db.addGalonPurchase(purchase);
+    } catch (error) {
+      console.error("Error recording galon purchase:", error);
+      throw error;
+    }
+  }
+
+  async recordGalonUsage(location) {
+    try {
+      const usage = {
+        location,
+        emptyDate: new Date(),
+        lastPurchase: this.state.lastPurchase,
+        daysSinceLastPurchase: this.calculateDaysSinceLastPurchase(),
+      };
+
+      await db.addGalonUsage(usage);
+      this.updateUsageStatistics(usage);
+    } catch (error) {
+      console.error("Error recording galon usage:", error);
+      throw error;
+    }
+  }
+
+  async getUsageStatistics() {
+    try {
+      const usage = await db.getGalonUsage();
+      return {
+        averageDuration: this.calculateAverageDuration(usage),
+        mostFrequentUser: this.findMostFrequentUser(usage),
+        costAnalysis: this.analyzeCosts(usage),
+      };
+    } catch (error) {
+      console.error("Error getting usage statistics:", error);
       throw error;
     }
   }
