@@ -8,7 +8,7 @@ const webhookController = require("../controllers/webhookController");
 const galonService = require("../services/galonService");
 const reminderService = require("../services/reminderService");
 const piketService = require("../services/piketService");
-const { sendWhatsAppMessage } = require("../services/messageService");
+const messageService = require("../services/messageService");
 
 const app = express();
 
@@ -26,7 +26,6 @@ app.post("/webhook", async (req, res) => {
 
     console.log("📥 Incoming webhook:", messageData);
 
-    // Check if message body exists
     if (!messageData.body) {
       console.log("Missing message body");
       return res.status(400).json({ error: "Missing message body" });
@@ -34,16 +33,11 @@ app.post("/webhook", async (req, res) => {
 
     const result = await webhookController.handleIncomingMessage(messageData);
 
-    // If we have a response
-    // If we have a response
     if (result) {
-      // Format log message properly
       const logMessage = typeof result === "object" ? result.message : result;
       console.log("📤 Sending response:", logMessage);
 
-      // Jika response adalah object dengan isNotification true
       if (typeof result === "object" && result.isNotification) {
-        // Hanya kirim konfirmasi ke Twilio
         return res.status(200).json({
           success: true,
           message: result.message,
@@ -51,10 +45,12 @@ app.post("/webhook", async (req, res) => {
       }
 
       try {
-        // Send response via WhatsApp untuk non-notification
-        await sendWhatsAppMessage(messageData.from, typeof result === "object" ? result.message : result);
+        const success = await messageService.sendWhatsAppMessage(messageData.from, typeof result === "object" ? result.message : result);
 
-        // Send success response to Twilio
+        if (!success) {
+          throw new Error("Failed to send message");
+        }
+
         return res.status(200).json({ success: true });
       } catch (error) {
         console.error("❌ Error sending message:", error);
@@ -123,9 +119,12 @@ function setupScheduledTasks() {
 // Initialize services and start server
 async function startServer(port = config.server.port) {
   try {
-    // Initialize database
+    // Initialize database first
     console.log("🔄 Initializing database...");
-    await db.initializeDatabase();
+    await db.initializeDatabase().catch((error) => {
+      console.error("Failed to initialize database:", error);
+      throw error;
+    });
     console.log("✅ Database initialized");
 
     // Initialize galon service

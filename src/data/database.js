@@ -767,14 +767,21 @@ async function retryDatabaseOperation(operation, originalError, maxRetries = 3) 
 }
 
 async function getPiketTask(phoneNumber, date) {
-  try {
-    const formattedDate = date.toISOString().split("T")[0];
-    const query = "SELECT * FROM piket_tasks WHERE phone_number = ? AND date = ?";
-    const [rows] = await this.connection.execute(query, [phoneNumber, formattedDate]);
-    return rows[0];
-  } catch (error) {
-    return handleDatabaseError("mengambil data piket", error);
-  }
+  return new Promise((resolve, reject) => {
+    try {
+      const formattedDate = new Date(date).toISOString().split("T")[0];
+      db.get("SELECT * FROM piket_tasks WHERE phone_number = ? AND date = ?", [phoneNumber, formattedDate], (err, row) => {
+        if (err) {
+          console.error("Error getting piket task:", err);
+          reject(err);
+        } else {
+          resolve(row);
+        }
+      });
+    } catch (error) {
+      return handleDatabaseError("mengambil data piket", error);
+    }
+  });
 }
 
 // Tambahkan mekanisme transaksi yang lebih robust

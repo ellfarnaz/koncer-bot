@@ -2,10 +2,9 @@ require("dotenv").config();
 const twilio = require("twilio");
 const appConfig = require("../config/config");
 
-const client = twilio(appConfig.twilio.accountSid, appConfig.twilio.authToken);
-
 class MessageService {
   constructor() {
+    this.client = twilio(appConfig.twilio.accountSid, appConfig.twilio.authToken);
     this.messageQueue = [];
     this.retryCount = new Map();
     this.MAX_RETRIES = 3;
@@ -20,14 +19,14 @@ class MessageService {
         body: message,
       };
 
-      const response = await client.messages.create(messageConfig);
+      const response = await this.client.messages.create(messageConfig);
       console.log(`✅ Message sent to ${to}:`, response.sid);
       return true;
     } catch (error) {
       if (error.code === 21609) {
         console.warn(`⚠️ StatusCallback warning for ${to}, retrying without callback...`);
         try {
-          const response = await client.messages.create({
+          const response = await this.client.messages.create({
             from: appConfig.twilio.phoneNumber,
             to: to,
             body: message,
@@ -110,7 +109,7 @@ class MessageService {
         body: item.message,
       };
 
-      const response = await client.messages.create(messageConfig);
+      const response = await this.client.messages.create(messageConfig);
       console.log(`✅ Message sent to ${item.to}:`, response.sid);
 
       // Add delay after successful send
@@ -122,7 +121,7 @@ class MessageService {
       if (error.code === 21609) {
         console.warn(`⚠️ StatusCallback warning for ${item.to}, retrying without callback...`);
         try {
-          const response = await client.messages.create({
+          const response = await this.client.messages.create({
             from: appConfig.twilio.phoneNumber,
             to: item.to,
             body: item.message,

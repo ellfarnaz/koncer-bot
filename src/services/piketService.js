@@ -31,13 +31,15 @@ class PiketService {
       const today = new Date();
       const currentDayName = today.toLocaleDateString("en-US", { weekday: "long" });
 
-      // Get tasks from database
-      const lastWeekTasks = await db.getLastWeekPiketTasks();
-      console.log("Retrieved tasks from database:", lastWeekTasks);
+      // Get tasks from database with error handling
+      const lastWeekTasks = await db.getLastWeekPiketTasks().catch((error) => {
+        console.error("Error getting last week tasks:", error);
+        return [];
+      });
 
-      // Validasi data minggu lalu
+      // Validasi data minggu lalu dengan penanganan yang lebih baik
       if (!lastWeekTasks || lastWeekTasks.length === 0) {
-        throw new Error("Tidak ada data piket minggu lalu");
+        return "Belum ada data piket untuk minggu lalu. Mulai mencatat dari sekarang!";
       }
 
       // Create a Map for easy lookup of task status
@@ -53,7 +55,7 @@ class PiketService {
         ])
       );
 
-      // Get schedule for display
+      // Get schedule for display with better error handling
       const scheduleList = await Promise.all(
         Object.entries(config.piket.jadwal).map(async ([hari, jadwal]) => {
           const task = taskMap.get(jadwal.nomor);
@@ -69,7 +71,14 @@ class PiketService {
 
           // Next week dates - menggunakan tanggal dinamis
           const nextWeekDate = this.getNextWeekDate(today, Object.keys(config.piket.jadwal).indexOf(hari));
-          const nextWeekTask = await db.getPiketTask(jadwal.nomor, nextWeekDate);
+
+          // Get next week task with error handling
+          let nextWeekTask = null;
+          try {
+            nextWeekTask = await db.getPiketTask(jadwal.nomor, nextWeekDate);
+          } catch (error) {
+            console.error(`Error getting next week task for ${jadwal.nama}:`, error);
+          }
 
           const isToday = currentDayName === this.getDayNameInEnglish(hari);
           const statusIcon = isToday ? "⏰" : this.getStatusIcon(nextWeekTask);
